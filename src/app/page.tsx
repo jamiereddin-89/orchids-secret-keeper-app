@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -74,10 +74,6 @@ interface ProviderGroup {
   order: number;
 }
 
-type ProviderGroupMap = Record<string, string>;
-type ProviderLogoMap = Record<string, string | null>;
-type AccountExpandMap = Record<string, string[]>;
-
 interface UISettings {
   displayMode: "full" | "compact";
   textSize: "small" | "medium" | "large";
@@ -97,7 +93,6 @@ export default function Home() {
   const [secrets, setSecrets] = useState<Secret[]>([]);
   const [providerGroups, setProviderGroups] = useState<ProviderGroup[]>([]);
   const [expandedProviders, setExpandedProviders] = useState<Set<string>>(new Set());
-  const [accountExpanded, setAccountExpanded] = useState<AccountExpandMap>({});
   const [revealedSecrets, setRevealedSecrets] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState("");
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
@@ -105,9 +100,6 @@ export default function Home() {
   const [formData, setFormData] = useState({ provider: "", secret: "", accountName: "" });
   const [deleteTarget, setDeleteTarget] = useState<{ type: "secret" | "provider"; id: string; name: string } | null>(null);
   const [providerOrder, setProviderOrder] = useState<string[]>([]);
-  const [providerGroupMap, setProviderGroupMap] = useState<ProviderGroupMap>({});
-  const [groupEdits, setGroupEdits] = useState<Record<string, string>>({});
-  const [providerLogos, setProviderLogos] = useState<ProviderLogoMap>({});
   const [draggedProvider, setDraggedProvider] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [puterReady, setPuterReady] = useState(false);
@@ -307,16 +299,12 @@ export default function Home() {
   const handleDeleteAllData = async () => {
     if (!storage) throw new Error("Storage not ready");
     try {
-      const secretKeys = (await storage.list("secret_*")) || [];
+      const secretKeys = await storage.list("secret_*");
       for (const item of secretKeys) {
-        if (item?.key) {
-          await storage.del(item.key);
-        }
+        await storage.del(item.key);
       }
-      const metaKeys = ["provider_order", "ui_settings", "provider_group_map", "provider_logo_cache"];
-      for (const key of metaKeys) {
-        await storage.del(key);
-      }
+      await storage.del("provider_order");
+      await storage.del("ui_settings");
       setSecrets([]);
       setProviderGroups([]);
       setProviderOrder([]);
