@@ -25,6 +25,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
 import {
   Plus,
   Eye,
@@ -40,6 +41,7 @@ import {
   GripVertical,
   Key,
   Settings,
+  Tag,
 } from "lucide-react";
 import { toast, Toaster } from "sonner";
 import { SettingsDialog } from "@/components/settings-dialog";
@@ -72,12 +74,21 @@ interface ProviderGroup {
   provider: string;
   secrets: Secret[];
   order: number;
+  groupLabel: string;
+  icon?: string | null;
+  domain?: string;
 }
 
 interface UISettings {
   displayMode: "full" | "compact";
   textSize: "small" | "medium" | "large";
   defaultExpanded: boolean;
+}
+
+interface ProviderMeta {
+  group?: string;
+  icon?: string | null;
+  domain?: string;
 }
 
 const defaultUISettings: UISettings = {
@@ -87,13 +98,14 @@ const defaultUISettings: UISettings = {
 };
 
 export default function Home() {
-  const [isSignedIn, setIsSignedIn] = useState(true);
-  const [username, setUsername] = useState("dev_user");
+  const [isSignedIn, setIsSignedIn] = useState(false);
+  const [username, setUsername] = useState("Local User");
   const [isDark, setIsDark] = useState(true);
   const [secrets, setSecrets] = useState<Secret[]>([]);
   const [providerGroups, setProviderGroups] = useState<ProviderGroup[]>([]);
   const [expandedProviders, setExpandedProviders] = useState<Set<string>>(new Set());
   const [revealedSecrets, setRevealedSecrets] = useState<Set<string>>(new Set());
+  const [accountExpanded, setAccountExpanded] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState("");
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [editingSecret, setEditingSecret] = useState<Secret | null>(null);
@@ -101,6 +113,7 @@ export default function Home() {
   const [deleteTarget, setDeleteTarget] = useState<{ type: "secret" | "provider"; id: string; name: string } | null>(null);
   const [providerOrder, setProviderOrder] = useState<string[]>([]);
   const [draggedProvider, setDraggedProvider] = useState<string | null>(null);
+  const [providerMeta, setProviderMeta] = useState<Record<string, ProviderMeta>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [puterReady, setPuterReady] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -126,6 +139,15 @@ export default function Home() {
     const isPuterSignedIn = typeof puter !== "undefined" && puter.auth.isSignedIn();
     const adapter = getStorageAdapter(isPuterSignedIn);
     setStorage(adapter);
+    setIsSignedIn(isPuterSignedIn);
+    if (!isPuterSignedIn) {
+      setUsername("Local User");
+    } else {
+      puter.auth
+        .getUser()
+        .then((user) => setUsername(user.username || "Local User"))
+        .catch(() => setUsername("Local User"));
+    }
     setIsLoading(false);
     loadUISettings(adapter);
   }, [puterReady]);
@@ -134,6 +156,7 @@ export default function Home() {
     if (storage) {
       loadSecrets();
       loadProviderOrder();
+      loadProviderMeta();
     }
   }, [storage]);
 
@@ -153,9 +176,7 @@ export default function Home() {
       if (saved) {
         setUISettings(JSON.parse(saved));
       }
-    } catch {
-      console.error("Failed to load UI settings");
-    }
+    } catch {}
   };
 
   const saveUISettings = async (settings: UISettings) => {
@@ -163,10 +184,69 @@ export default function Home() {
     if (storage) {
       try {
         await storage.set("ui_settings", JSON.stringify(settings));
-      } catch {
-        console.error("Failed to save UI settings");
-      }
+      } catch {}
     }
+  };
+
+  const loadProviderMeta = async () => {
+    if (!storage) return;
+    try {
+      const saved = await storage.get("provider_meta");
+      if (saved) {
+        setProviderMeta(JSON.parse(saved));
+      }
+    } catch {}
+  };
+
+  const updateProviderMeta = (updater: (prev: Record<string, ProviderMeta>) => Record<string, ProviderMeta>) => {
+    setProviderMeta((prev) => {
+      const next = updater(prev);
+      if (storage) {
+        storage.set("provider_meta", JSON.stringify(next)).catch(() => {});
+      }
+      return next;
+    });
+  };
+
+  const resolveDomain = (provider: string) => {
+    const normalized = provider.toLowerCase().trim();
+    const map: Record<string, string> = {
+      openai: "openai.com",
+      stripe: "stripe.com",
+      aws: "aws.amazon.com",
+      amazon: "amazon.com",
+      google: "google.com",
+      github: "github.com",
+      vercel: "vercel.com",
+      supabase: "supabase.com",
+      notion: "notion.so",
+      slack: "slack.com",
+      discord: "discord.com",
+    };
+    if (map[normalized]) return map[normalized];
+    const slug = normalized.replace(/[^a-z0-9]/g, "");
+    if (!slug) return null;
+    return `${slug}.com`;
+  };
+
+  const fetchProviderIcon = async (provider: string) => {
+    const domain = resolveDomain(provider);
+    if (!domain) return null;
+    const url = `https://icon.horse/icon/${domain}`;
+    try {
+      const res = await fetch(url, { method: "HEAD" });
+      if (!res.ok) return url;
+      return url;
+    } catch {
+      return url;
+    }
+  };
+
+  const ensureProviderIcon = async (provider: string) => {
+    if (!provider || providerMeta[provider]?.icon !== undefined) return;
+    const icon = await fetchProviderIcon(provider);
+    const domain = resolveDomain(provider) || undefined;
+    updateProviderMeta((prev) => ({ ...prev, [provider]: { ...prev[provider], icon, domain } }));
   };
 
   const loadSecrets = async () => {
@@ -175,9 +255,7 @@ export default function Home() {
       const items = await storage.list("secret_*", true);
       const loadedSecrets: Secret[] = items.map((item) => JSON.parse(item.value));
       setSecrets(loadedSecrets);
-    } catch {
-      console.error("Failed to load secrets");
-    }
+    } catch {}
   };
 
   const loadProviderOrder = async () => {
@@ -187,9 +265,7 @@ export default function Home() {
       if (order) {
         setProviderOrder(JSON.parse(order));
       }
-    } catch {
-      console.error("Failed to load provider order");
-    }
+    } catch {}
   };
 
   const saveProviderOrder = async (order: string[]) => {
@@ -197,9 +273,7 @@ export default function Home() {
     try {
       await storage.set("provider_order", JSON.stringify(order));
       setProviderOrder(order);
-    } catch {
-      console.error("Failed to save provider order");
-    }
+    } catch {}
   };
 
   const groupSecrets = useCallback(() => {
@@ -214,22 +288,38 @@ export default function Home() {
     const providers = Object.keys(groups);
     const orderedProviders = [...providerOrder.filter((p) => providers.includes(p)), ...providers.filter((p) => !providerOrder.includes(p))];
 
-    const result: ProviderGroup[] = orderedProviders.map((provider, index) => ({
-      provider,
-      secrets: groups[provider].sort((a, b) => a.order - b.order),
-      order: index,
-    }));
+    const result: ProviderGroup[] = orderedProviders.map((provider, index) => {
+      const meta = providerMeta[provider] || {};
+      return {
+        provider,
+        secrets: groups[provider].sort((a, b) => a.order - b.order),
+        order: index,
+        groupLabel: meta.group?.trim() || "Ungrouped",
+        icon: meta.icon,
+        domain: meta.domain,
+      };
+    });
 
     setProviderGroups(result);
-  }, [secrets, providerOrder]);
+  }, [secrets, providerOrder, providerMeta]);
 
   useEffect(() => {
     groupSecrets();
   }, [groupSecrets]);
 
+  useEffect(() => {
+    const providers = Array.from(new Set(secrets.map((s) => s.provider)));
+    providers.forEach((p) => {
+      if (providerMeta[p]?.icon === undefined) {
+        ensureProviderIcon(p);
+      }
+    });
+  }, [secrets, providerMeta]);
+
   const filteredGroups = providerGroups.filter((group) => {
     const query = searchQuery.toLowerCase();
     if (group.provider.toLowerCase().includes(query)) return true;
+    if (group.groupLabel.toLowerCase().includes(query)) return true;
     return group.secrets.some((s) => s.accountName.toLowerCase().includes(query) || s.secret.toLowerCase().includes(query));
   });
 
@@ -251,6 +341,7 @@ export default function Home() {
 
     try {
       await storage.set(id, JSON.stringify(newSecret));
+      await ensureProviderIcon(newSecret.provider);
       await loadSecrets();
       setIsAddDialogOpen(false);
       setEditingSecret(null);
@@ -281,6 +372,11 @@ export default function Home() {
       }
       const newOrder = providerOrder.filter((p) => p !== provider);
       await saveProviderOrder(newOrder);
+      updateProviderMeta((prev) => {
+        const next = { ...prev };
+        delete next[provider];
+        return next;
+      });
       await loadSecrets();
       toast.success(`Deleted all ${provider} secrets`);
     } catch {
@@ -299,20 +395,22 @@ export default function Home() {
   const handleDeleteAllData = async () => {
     if (!storage) throw new Error("Storage not ready");
     try {
-      const secretKeys = await storage.list("secret_*");
+      const secretKeys = await storage.list("secret_*", false);
       for (const item of secretKeys) {
         await storage.del(item.key);
       }
       await storage.del("provider_order");
       await storage.del("ui_settings");
+      await storage.del("provider_meta");
       setSecrets([]);
       setProviderGroups([]);
       setProviderOrder([]);
       setExpandedProviders(new Set());
       setRevealedSecrets(new Set());
+      setAccountExpanded(new Set());
       setUISettings(defaultUISettings);
+      setProviderMeta({});
     } catch (error) {
-      console.error("Failed to delete all data", error);
       throw error;
     }
   };
@@ -336,6 +434,16 @@ export default function Home() {
       const next = new Set(prev);
       if (next.has(provider)) next.delete(provider);
       else next.add(provider);
+      return next;
+    });
+  };
+
+  const toggleAccount = (provider: string, accountName: string) => {
+    const key = `${provider}::${accountName}`;
+    setAccountExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       return next;
     });
   };
@@ -381,49 +489,64 @@ export default function Home() {
 
   if (isLoading || !puterReady) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 flex items-center justify-center">
-        <div className="flex flex-col items-center gap-4">
-          <div className="w-12 h-12 border-4 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin" />
-          <p className="text-slate-400 font-medium">Loading...</p>
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-12 h-12 border-4 border-slate-200 dark:border-slate-800 border-t-emerald-500 rounded-full animate-spin" />
+          <p className="text-slate-500 dark:text-slate-400 font-medium">Loading...</p>
         </div>
       </div>
     );
   }
 
+  const groupedByLabel = filteredGroups.reduce<Record<string, ProviderGroup[]>>((acc, group) => {
+    const label = group.groupLabel || "Ungrouped";
+    if (!acc[label]) acc[label] = [];
+    acc[label].push(group);
+    return acc;
+  }, {});
+
+  const sortedGroupLabels = Object.keys(groupedByLabel).sort((a, b) => {
+    if (a === "Ungrouped" && b !== "Ungrouped") return 1;
+    if (b === "Ungrouped" && a !== "Ungrouped") return -1;
+    return a.localeCompare(b);
+  });
+
+  const displayUser = username?.trim() || "Local User";
+
   return (
-    <div className={`min-h-screen ${isDark ? "bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950" : "bg-gradient-to-br from-slate-100 via-white to-slate-100"}`}>
+    <div className={`min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-50` }>
       <Toaster position="top-center" richColors />
-      <header className={`sticky top-0 z-50 ${isDark ? "bg-slate-900/80 border-slate-800/50" : "bg-white/80 border-slate-200"} backdrop-blur-xl border-b`}>
-        <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
+      <header className="sticky top-0 z-50 border-b border-slate-200 dark:border-slate-800 bg-white/85 dark:bg-slate-900/85 backdrop-blur">
+        <div className="max-w-5xl w-full mx-auto px-4 sm:px-6 py-3 flex flex-wrap gap-4 items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className={`w-9 h-9 rounded-xl ${isDark ? "bg-gradient-to-br from-emerald-500 to-teal-600" : "bg-gradient-to-br from-emerald-400 to-teal-500"} flex items-center justify-center shadow-lg shadow-emerald-500/20`}>
-              <Key className="w-5 h-5 text-white" />
+            <div className="w-10 h-10 rounded-2xl bg-emerald-600 text-white flex items-center justify-center">
+              <Key className="w-5 h-5" />
             </div>
             <div>
-              <h1 className={`font-bold ${isDark ? "text-white" : "text-slate-900"}`}>Secret Keeper</h1>
-              <p className={`text-xs ${isDark ? "text-slate-500" : "text-slate-500"}`}>{username}</p>
+              <h1 className="font-bold text-lg">API Vault - JR</h1>
+              <p className="text-xs text-slate-500 dark:text-slate-400">{displayUser}</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="ghost" size="icon" onClick={() => setIsDark(!isDark)} className={isDark ? "text-slate-400 hover:text-white" : "text-slate-600 hover:text-slate-900"}>
+            <Button variant="outline" size="icon" onClick={() => setIsDark(!isDark)} className="border-slate-200 dark:border-slate-700">
               {isDark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
             </Button>
-            <Button variant="ghost" size="icon" onClick={() => setIsSettingsOpen(true)} className={isDark ? "text-slate-400 hover:text-white" : "text-slate-600 hover:text-slate-900"}>
+            <Button variant="outline" size="icon" onClick={() => setIsSettingsOpen(true)} className="border-slate-200 dark:border-slate-700">
               <Settings className="w-5 h-5" />
             </Button>
           </div>
         </div>
       </header>
 
-      <main className="max-w-4xl mx-auto px-4 py-6">
-        <div className="flex gap-3 mb-6">
-          <div className={`flex-1 relative ${isDark ? "bg-slate-800/50 border-slate-700/50" : "bg-white border-slate-200"} border rounded-xl overflow-hidden`}>
-            <Search className={`absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 ${isDark ? "text-slate-500" : "text-slate-400"}`} />
+      <main className="max-w-5xl w-full mx-auto px-4 sm:px-6 py-6 flex flex-col gap-4 pb-12">
+        <div className="flex flex-col sm:flex-row gap-3">
+          <div className={`flex-1 relative border rounded-2xl bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800`}> 
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
             <Input
-              placeholder="Search keys, providers, or accounts..."
+              placeholder="Search providers, groups, or accounts"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className={`border-0 pl-10 ${isDark ? "bg-transparent text-white placeholder:text-slate-500" : "bg-transparent text-slate-900 placeholder:text-slate-400"} focus-visible:ring-0 focus-visible:ring-offset-0`}
+              className="border-0 pl-11 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 text-slate-900 dark:text-slate-50 placeholder:text-slate-400"
             />
           </div>
           <Button
@@ -432,100 +555,178 @@ export default function Home() {
               setFormData({ provider: "", secret: "", accountName: "" });
               setIsAddDialogOpen(true);
             }}
-            className="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white font-semibold px-4 rounded-xl shadow-lg shadow-emerald-500/20"
+            className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl px-4"
           >
             <Plus className="w-5 h-5" />
           </Button>
         </div>
 
         {filteredGroups.length === 0 ? (
-          <div className={`text-center py-16 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-            <Key className="w-16 h-16 mx-auto mb-4 opacity-30" />
-            <p className="text-lg font-medium">{secrets.length === 0 ? "No secrets yet" : "No matches found"}</p>
-            <p className="text-sm mt-1">{secrets.length === 0 ? "Click + to add your first secret" : "Try a different search term"}</p>
+          <div className="text-center py-16 border border-dashed border-slate-200 dark:border-slate-800 rounded-3xl bg-white dark:bg-slate-900">
+            <Key className="w-16 h-16 mx-auto mb-3 text-slate-300 dark:text-slate-700" />
+            <p className="text-lg font-semibold">{secrets.length === 0 ? "No secrets yet" : "No matches found"}</p>
+            <p className="text-sm text-slate-500 dark:text-slate-400">{secrets.length === 0 ? "Tap + to add your first secret" : "Try another search term"}</p>
           </div>
         ) : (
-          <div className="space-y-3">
-            {filteredGroups.map((group) => (
-              <div
-                key={group.provider}
-                draggable
-                onDragStart={() => handleDragStart(group.provider)}
-                onDragOver={(e) => handleDragOver(e, group.provider)}
-                onDrop={() => handleDrop(group.provider)}
-                className={`${isDark ? "bg-slate-800/50 border-slate-700/50" : "bg-white border-slate-200"} border rounded-2xl overflow-hidden transition-all ${draggedProvider === group.provider ? "opacity-50 scale-[0.98]" : ""}`}
-              >
-                <Collapsible open={expandedProviders.has(group.provider)} onOpenChange={() => toggleExpand(group.provider)}>
-                  <CollapsibleTrigger asChild>
-                    <div className={`flex items-center justify-between ${compactPadding} cursor-pointer ${isDark ? "hover:bg-slate-700/30" : "hover:bg-slate-50"} transition-colors`}>
-                      <div className="flex items-center gap-3">
-                        <GripVertical className={`w-4 h-4 ${isDark ? "text-slate-600" : "text-slate-300"} cursor-grab`} />
-                        <div className={`${uiSettings.displayMode === "compact" ? "w-8 h-8" : "w-10 h-10"} rounded-xl ${isDark ? "bg-gradient-to-br from-slate-700 to-slate-800" : "bg-gradient-to-br from-slate-100 to-slate-200"} flex items-center justify-center font-bold ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>
-                          {group.provider.charAt(0).toUpperCase()}
-                        </div>
-                        <div>
-                          <h3 className={`font-semibold ${textSizeClass} ${isDark ? "text-white" : "text-slate-900"}`}>{group.provider}</h3>
-                          <p className={`text-xs ${isDark ? "text-slate-500" : "text-slate-500"}`}>{group.secrets.length} secret{group.secrets.length !== 1 ? "s" : ""}</p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setDeleteTarget({ type: "provider", id: group.provider, name: group.provider });
-                          }}
-                          className={isDark ? "text-slate-500 hover:text-red-400" : "text-slate-400 hover:text-red-500"}
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-                        {expandedProviders.has(group.provider) ? (
-                          <ChevronDown className={`w-5 h-5 ${isDark ? "text-slate-500" : "text-slate-400"}`} />
-                        ) : (
-                          <ChevronRight className={`w-5 h-5 ${isDark ? "text-slate-500" : "text-slate-400"}`} />
-                        )}
-                      </div>
-                    </div>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent>
-                    <div className={`${isDark ? "border-slate-700/50" : "border-slate-100"} border-t`}>
-                      {group.secrets.map((secret) => (
-                        <div key={secret.id} className={`${compactPadding} ${isDark ? "border-slate-700/30 hover:bg-slate-700/20" : "border-slate-100 hover:bg-slate-50"} border-b last:border-b-0 transition-colors`}>
-                          <div className="flex items-start justify-between gap-4">
-                            <div className="flex-1 min-w-0">
-                              <p className={`${textSizeClass} font-medium ${isDark ? "text-slate-300" : "text-slate-700"}`}>{secret.accountName}</p>
-                              <div className="mt-2 flex items-center gap-2">
-                                <code className={`flex-1 ${textSizeClass} font-mono ${isDark ? "bg-slate-900/50 text-emerald-400" : "bg-slate-100 text-emerald-600"} px-3 py-2 rounded-lg truncate`}>
-                                  {revealedSecrets.has(secret.id) ? secret.secret : "••••••••••••••••"}
-                                </code>
+          <div className="space-y-5">
+            {sortedGroupLabels.map((label) => (
+              <div key={label} className="space-y-2">
+                <div className="flex items-center justify-between px-1">
+                  <div className="flex items-center gap-2 text-xs uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">
+                    <Tag className="w-4 h-4" />
+                    <span>{label}</span>
+                  </div>
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400">{groupedByLabel[label].length} provider{groupedByLabel[label].length !== 1 ? "s" : ""}</span>
+                </div>
+                <div className="space-y-3">
+                  {groupedByLabel[label].map((group) => {
+                    const accountGroups = group.secrets.reduce<Record<string, Secret[]>>((acc, secret) => {
+                      const key = secret.accountName || "Default";
+                      if (!acc[key]) acc[key] = [];
+                      acc[key].push(secret);
+                      return acc;
+                    }, {});
+
+                    return (
+                      <div
+                        key={group.provider}
+                        draggable
+                        onDragStart={() => handleDragStart(group.provider)}
+                        onDragOver={(e) => handleDragOver(e, group.provider)}
+                        onDrop={() => handleDrop(group.provider)}
+                        className={`border rounded-3xl bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 shadow-sm transition-all ${draggedProvider === group.provider ? "opacity-70 scale-[0.99]" : ""}`}
+                      >
+                        <Collapsible open={expandedProviders.has(group.provider)} onOpenChange={() => toggleExpand(group.provider)}>
+                          <CollapsibleTrigger asChild>
+                            <div className={`flex items-center justify-between ${compactPadding} cursor-pointer`}> 
+                              <div className="flex items-center gap-3 min-w-0">
+                                <GripVertical className="w-4 h-4 text-slate-300 dark:text-slate-600" />
+                                <div className="w-11 h-11 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 flex items-center justify-center overflow-hidden">
+                                  {group.icon ? (
+                                    <img src={group.icon} alt={group.provider} className="w-full h-full object-contain" />
+                                  ) : (
+                                    <span className="text-sm font-bold text-emerald-600 dark:text-emerald-400">{group.provider.charAt(0).toUpperCase()}</span>
+                                  )}
+                                </div>
+                                <div className="min-w-0">
+                                  <h3 className={`font-semibold ${textSizeClass} truncate`}>{group.provider}</h3>
+                                  <div className="flex items-center gap-2 mt-1">
+                                    <Badge variant="outline" className="rounded-full border-slate-200 dark:border-slate-700 text-[11px] px-2 py-0">{group.groupLabel}</Badge>
+                                    <span className="text-xs text-slate-500 dark:text-slate-400">{group.secrets.length} secret{group.secrets.length !== 1 ? "s" : ""}</span>
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setDeleteTarget({ type: "provider", id: group.provider, name: group.provider });
+                                  }}
+                                  className="text-slate-400 hover:text-red-500"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </Button>
+                                {expandedProviders.has(group.provider) ? (
+                                  <ChevronDown className="w-5 h-5 text-slate-500" />
+                                ) : (
+                                  <ChevronRight className="w-5 h-5 text-slate-500" />
+                                )}
                               </div>
                             </div>
-                            <div className="flex items-center gap-1">
-                              <Button variant="ghost" size="icon" onClick={() => toggleReveal(secret.id)} className={isDark ? "text-slate-500 hover:text-white" : "text-slate-400 hover:text-slate-700"}>
-                                {revealedSecrets.has(secret.id) ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                              </Button>
-                              <Button variant="ghost" size="icon" onClick={() => handleCopy(secret.secret)} className={isDark ? "text-slate-500 hover:text-white" : "text-slate-400 hover:text-slate-700"}>
-                                <Copy className="w-4 h-4" />
-                              </Button>
-                              <Button variant="ghost" size="icon" onClick={() => openEditDialog(secret)} className={isDark ? "text-slate-500 hover:text-white" : "text-slate-400 hover:text-slate-700"}>
-                                <Pencil className="w-4 h-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => setDeleteTarget({ type: "secret", id: secret.id, name: `${secret.provider} - ${secret.accountName}` })}
-                                className={isDark ? "text-slate-500 hover:text-red-400" : "text-slate-400 hover:text-red-500"}
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </Button>
+                          </CollapsibleTrigger>
+                          <CollapsibleContent>
+                            <div className="border-t border-slate-100 dark:border-slate-800 px-4 sm:px-6 pb-4 pt-3 space-y-3">
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3">
+                                <div className="col-span-2">
+                                  <Label className="text-xs text-slate-500">Group</Label>
+                                  <Input
+                                    value={providerMeta[group.provider]?.group || ""}
+                                    placeholder="Add to group"
+                                    onChange={(e) => {
+                                      const value = e.target.value;
+                                      updateProviderMeta((prev) => ({
+                                        ...prev,
+                                        [group.provider]: {
+                                          ...prev[group.provider],
+                                          group: value.trim() ? value : undefined,
+                                          domain: prev[group.provider]?.domain || resolveDomain(group.provider) || undefined,
+                                          icon: prev[group.provider]?.icon,
+                                        },
+                                      }));
+                                    }}
+                                    className="mt-1 text-sm"
+                                  />
+                                </div>
+                                <div className="sm:justify-self-end flex items-end">
+                                  <Badge variant="secondary" className="rounded-full px-3 py-1 text-[12px] bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+                                    {providerMeta[group.provider]?.domain || resolveDomain(group.provider) || "No domain"}
+                                  </Badge>
+                                </div>
+                              </div>
+
+                              <div className="space-y-2">
+                                {Object.keys(accountGroups)
+                                  .sort((a, b) => a.localeCompare(b))
+                                  .map((accountName) => {
+                                    const accountKey = `${group.provider}::${accountName}`;
+                                    const isOpen = accountExpanded.has(accountKey);
+                                    return (
+                                      <div key={accountName} className="border border-slate-100 dark:border-slate-800 rounded-2xl bg-slate-50/60 dark:bg-slate-900/60">
+                                        <button
+                                          className="w-full flex items-center justify-between px-3 py-2"
+                                          onClick={() => toggleAccount(group.provider, accountName)}
+                                        >
+                                          <div className="flex items-center gap-2">
+                                            {isOpen ? <ChevronDown className="w-4 h-4 text-slate-500" /> : <ChevronRight className="w-4 h-4 text-slate-500" />}
+                                            <span className="text-sm font-medium text-slate-700 dark:text-slate-200">{accountName}</span>
+                                          </div>
+                                          <span className="text-xs text-slate-500 dark:text-slate-400">{accountGroups[accountName].length} key{accountGroups[accountName].length !== 1 ? "s" : ""}</span>
+                                        </button>
+                                        {isOpen && (
+                                          <div className="border-t border-slate-100 dark:border-slate-800 space-y-2 p-3">
+                                            {accountGroups[accountName].map((secret) => (
+                                              <div key={secret.id} className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
+                                                <div className="flex-1 min-w-0">
+                                                  <code className={`flex-1 ${textSizeClass} font-mono bg-white dark:bg-slate-950/60 text-emerald-700 dark:text-emerald-300 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 truncate`}>
+                                                    {revealedSecrets.has(secret.id) ? secret.secret : "••••••••••••••••"}
+                                                  </code>
+                                                </div>
+                                                <div className="flex items-center gap-1 self-start sm:self-center">
+                                                  <Button variant="ghost" size="icon" onClick={() => toggleReveal(secret.id)} className="text-slate-500 hover:text-slate-900 dark:hover:text-white">
+                                                    {revealedSecrets.has(secret.id) ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                                  </Button>
+                                                  <Button variant="ghost" size="icon" onClick={() => handleCopy(secret.secret)} className="text-slate-500 hover:text-slate-900 dark:hover:text-white">
+                                                    <Copy className="w-4 h-4" />
+                                                  </Button>
+                                                  <Button variant="ghost" size="icon" onClick={() => openEditDialog(secret)} className="text-slate-500 hover:text-slate-900 dark:hover:text-white">
+                                                    <Pencil className="w-4 h-4" />
+                                                  </Button>
+                                                  <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    onClick={() => setDeleteTarget({ type: "secret", id: secret.id, name: `${secret.provider} - ${secret.accountName}` })}
+                                                    className="text-slate-500 hover:text-red-500"
+                                                  >
+                                                    <Trash2 className="w-4 h-4" />
+                                                  </Button>
+                                                </div>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
+                              </div>
                             </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </CollapsibleContent>
-                </Collapsible>
+                          </CollapsibleContent>
+                        </Collapsible>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             ))}
           </div>
@@ -533,43 +734,43 @@ export default function Home() {
       </main>
 
       <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-        <DialogContent className={`${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"} max-w-md`}>
+        <DialogContent className="max-w-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl">
           <DialogHeader>
-            <DialogTitle className={isDark ? "text-white" : "text-slate-900"}>{editingSecret ? "Edit Secret" : "Add New Secret"}</DialogTitle>
+            <DialogTitle className="text-slate-900 dark:text-slate-50">{editingSecret ? "Edit Secret" : "Add New Secret"}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 mt-4">
             <div>
-              <Label className={isDark ? "text-slate-300" : "text-slate-700"}>Provider</Label>
+              <Label className="text-slate-700 dark:text-slate-200">Provider</Label>
               <Input
-                placeholder="e.g., OpenAI, Stripe, AWS"
+                placeholder="e.g., OpenAI, Stripe"
                 value={formData.provider}
                 onChange={(e) => setFormData({ ...formData, provider: e.target.value })}
-                className={`mt-1.5 ${isDark ? "bg-slate-800 border-slate-700 text-white placeholder:text-slate-500" : "bg-white border-slate-200 text-slate-900"}`}
+                className="mt-1.5 bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800"
               />
             </div>
             <div>
-              <Label className={isDark ? "text-slate-300" : "text-slate-700"}>Secret - API Key/Token</Label>
+              <Label className="text-slate-700 dark:text-slate-200">Secret - API Key/Token</Label>
               <Input
                 placeholder="Enter your secret key or token"
                 value={formData.secret}
                 onChange={(e) => setFormData({ ...formData, secret: e.target.value })}
-                className={`mt-1.5 font-mono ${isDark ? "bg-slate-800 border-slate-700 text-white placeholder:text-slate-500" : "bg-white border-slate-200 text-slate-900"}`}
+                className="mt-1.5 font-mono bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800"
               />
             </div>
             <div>
-              <Label className={isDark ? "text-slate-300" : "text-slate-700"}>Account Name (Optional)</Label>
+              <Label className="text-slate-700 dark:text-slate-200">Account Name (Optional)</Label>
               <Input
                 placeholder="e.g., Production, Personal"
                 value={formData.accountName}
                 onChange={(e) => setFormData({ ...formData, accountName: e.target.value })}
-                className={`mt-1.5 ${isDark ? "bg-slate-800 border-slate-700 text-white placeholder:text-slate-500" : "bg-white border-slate-200 text-slate-900"}`}
+                className="mt-1.5 bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800"
               />
             </div>
             <div className="flex gap-3 pt-2">
-              <Button variant="outline" onClick={() => setIsAddDialogOpen(false)} className={`flex-1 ${isDark ? "border-slate-700 text-slate-300 hover:bg-slate-800" : ""}`}>
+              <Button variant="outline" onClick={() => setIsAddDialogOpen(false)} className="flex-1 border-slate-200 dark:border-slate-800">
                 Cancel
               </Button>
-              <Button onClick={handleSaveSecret} className="flex-1 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white">
+              <Button onClick={handleSaveSecret} className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white">
                 Save
               </Button>
             </div>
@@ -578,17 +779,17 @@ export default function Home() {
       </Dialog>
 
       <AlertDialog open={!!deleteTarget} onOpenChange={() => setDeleteTarget(null)}>
-        <AlertDialogContent className={isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}>
+        <AlertDialogContent className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
           <AlertDialogHeader>
-            <AlertDialogTitle className={isDark ? "text-white" : "text-slate-900"}>Delete {deleteTarget?.type === "provider" ? "Provider" : "Secret"}?</AlertDialogTitle>
-            <AlertDialogDescription className={isDark ? "text-slate-400" : "text-slate-500"}>
+            <AlertDialogTitle className="text-slate-900 dark:text-slate-50">Delete {deleteTarget?.type === "provider" ? "Provider" : "Secret"}?</AlertDialogTitle>
+            <AlertDialogDescription className="text-slate-500 dark:text-slate-400">
               {deleteTarget?.type === "provider"
                 ? `This will delete all secrets for "${deleteTarget?.name}". This action cannot be undone.`
                 : `This will permanently delete "${deleteTarget?.name}".`}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel className={isDark ? "border-slate-700 text-slate-300 hover:bg-slate-800" : ""}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel className="border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-200">Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
                 if (deleteTarget?.type === "provider") {
