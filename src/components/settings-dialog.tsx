@@ -356,7 +356,7 @@ export function SettingsDialog({
                   </div>
                 )}
 
-                {monthlyUsage && (
+                {monthlyUsage && typeof monthlyUsage.used === "number" && typeof monthlyUsage.limit === "number" && (
                   <div className={`mb-4 p-3 rounded-lg ${isDark ? "bg-slate-900/50" : "bg-white"}`}>
                     <p className={`text-sm font-medium mb-2 ${isDark ? "text-slate-300" : "text-slate-700"}`}>Monthly Usage</p>
                     <div className="w-full bg-slate-700 rounded-full h-2 mb-1">
