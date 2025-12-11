@@ -14,6 +14,16 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   LogIn,
   LogOut,
   User,
@@ -26,6 +36,7 @@ import {
   Database,
   Info,
   X,
+  Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -71,6 +82,7 @@ interface SettingsDialogProps {
   onImportSecrets: (secrets: Secret[]) => Promise<void>;
   uiSettings: UISettings;
   onUISettingsChange: (settings: UISettings) => void;
+  onDeleteAllData: () => Promise<void>;
 }
 
 export function SettingsDialog({
@@ -86,12 +98,15 @@ export function SettingsDialog({
   onImportSecrets,
   uiSettings,
   onUISettingsChange,
+  onDeleteAllData,
 }: SettingsDialogProps) {
   const [puterUser, setPuterUser] = useState<{ username: string; email?: string; uuid?: string } | null>(null);
   const [monthlyUsage, setMonthlyUsage] = useState<{ used: number; limit: number } | null>(null);
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [showPasteInput, setShowPasteInput] = useState(false);
   const [pasteContent, setPasteContent] = useState("");
+  const [showDeleteAllDialog, setShowDeleteAllDialog] = useState(false);
+  const [isDeletingAll, setIsDeletingAll] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -441,6 +456,13 @@ export function SettingsDialog({
                 <Button onClick={() => setShowImportDialog(true)} className="w-full bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white">
                   <Upload className="w-4 h-4 mr-2" /> Import Secrets
                 </Button>
+                <Button
+                  onClick={() => setShowDeleteAllDialog(true)}
+                  variant="outline"
+                  className={`w-full border-red-500/50 text-red-500 hover:bg-red-500/10 ${isDark ? "bg-slate-900/40" : ""}`}
+                >
+                  <Trash2 className="w-4 h-4 mr-2" /> Delete All Data
+                </Button>
               </div>
               <p className={`text-xs ${isDark ? "text-slate-500" : "text-slate-400"}`}>
                 Export downloads a .env.download file. Import supports .env, .txt, .json, .md, .doc, .pdf files with API keys.
@@ -544,6 +566,38 @@ export function SettingsDialog({
           )}
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={showDeleteAllDialog} onOpenChange={setShowDeleteAllDialog}>
+        <AlertDialogContent className={`${isDark ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"}`}>
+          <AlertDialogHeader>
+            <AlertDialogTitle className={isDark ? "text-white" : "text-slate-900"}>Delete all data?</AlertDialogTitle>
+            <AlertDialogDescription className={isDark ? "text-slate-400" : "text-slate-500"}>
+              This removes all secrets, provider order, and settings from this device/account. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className={isDark ? "border-slate-700 text-slate-300 hover:bg-slate-800" : ""}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={isDeletingAll}
+              onClick={async () => {
+                try {
+                  setIsDeletingAll(true);
+                  await onDeleteAllData();
+                  toast.success("All data deleted");
+                  setShowDeleteAllDialog(false);
+                } catch {
+                  toast.error("Failed to delete data");
+                } finally {
+                  setIsDeletingAll(false);
+                }
+              }}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

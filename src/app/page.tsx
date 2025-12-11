@@ -296,6 +296,27 @@ export default function Home() {
     await loadSecrets();
   };
 
+  const handleDeleteAllData = async () => {
+    if (!storage) throw new Error("Storage not ready");
+    try {
+      const secretKeys = await storage.list("secret_*");
+      for (const item of secretKeys) {
+        await storage.del(item.key);
+      }
+      await storage.del("provider_order");
+      await storage.del("ui_settings");
+      setSecrets([]);
+      setProviderGroups([]);
+      setProviderOrder([]);
+      setExpandedProviders(new Set());
+      setRevealedSecrets(new Set());
+      setUISettings(defaultUISettings);
+    } catch (error) {
+      console.error("Failed to delete all data", error);
+      throw error;
+    }
+  };
+
   const handleCopy = (text: string) => {
     navigator.clipboard.writeText(text);
     toast.success("Copied to clipboard");
@@ -598,6 +619,7 @@ export default function Home() {
         onImportSecrets={handleImportSecrets}
         uiSettings={uiSettings}
         onUISettingsChange={saveUISettings}
+        onDeleteAllData={handleDeleteAllData}
       />
     </div>
   );
