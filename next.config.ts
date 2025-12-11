@@ -1,8 +1,6 @@
 import type { NextConfig } from "next";
 import path from "node:path";
 
-// Loader path from orchids-visual-edits - use direct resolve to get the actual file
-const loaderPath = require.resolve('orchids-visual-edits/loader.js');
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
 
 const nextConfig: NextConfig = {
@@ -28,13 +26,19 @@ const nextConfig: NextConfig = {
   eslint: {
     ignoreDuringBuilds: true,
   },
-  turbopack: {
-    rules: {
-      "*.{jsx,tsx}": {
-        loaders: [loaderPath]
-      }
-    }
-  }
+  webpack: (config, { isServer }) => {
+    config.module.rules.push({
+      test: /\.(jsx|tsx)$/,
+      include: path.resolve(__dirname, 'src'),
+      exclude: /node_modules/,
+      use: [
+        {
+          loader: require.resolve('orchids-visual-edits/loader.js'),
+        },
+      ],
+    });
+    return config;
+  },
 } as NextConfig;
 
 export default nextConfig;
