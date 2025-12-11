@@ -35,7 +35,6 @@ jobs:
           NEXT_TELEMETRY_DISABLED: 1
         run: |
           npm run build
-          npx next export
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
