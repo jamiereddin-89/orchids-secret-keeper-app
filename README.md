@@ -2,8 +2,6 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
-https://jamiereddin-89.github.io/orchids-secret-keeper-app/
-
 First, run the development server:
 
 ```bash

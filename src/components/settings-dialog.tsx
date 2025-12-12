@@ -309,6 +309,9 @@ export function SettingsDialog({
 
   const credentialsCount = secrets.length;
   const providersCount = new Set(secrets.map((s) => s.provider)).size;
+  const usageValue = typeof monthlyUsage?.used === "number" ? monthlyUsage.used : null;
+  const limitValue = typeof monthlyUsage?.limit === "number" ? monthlyUsage.limit : null;
+  const usagePercent = usageValue !== null && limitValue !== null && limitValue > 0 ? Math.min((usageValue / limitValue) * 100, 100) : 0;
 
   return (
     <>
@@ -356,17 +359,17 @@ export function SettingsDialog({
                   </div>
                 )}
 
-                {monthlyUsage && typeof monthlyUsage.used === "number" && typeof monthlyUsage.limit === "number" && (
+                {usageValue !== null && limitValue !== null && (
                   <div className={`mb-4 p-3 rounded-lg ${isDark ? "bg-slate-900/50" : "bg-white"}`}>
                     <p className={`text-sm font-medium mb-2 ${isDark ? "text-slate-300" : "text-slate-700"}`}>Monthly Usage</p>
                     <div className="w-full bg-slate-700 rounded-full h-2 mb-1">
                       <div
                         className="bg-emerald-500 h-2 rounded-full transition-all"
-                        style={{ width: `${Math.min((monthlyUsage.used / monthlyUsage.limit) * 100, 100)}%` }}
+                        style={{ width: `${usagePercent}%` }}
                       />
                     </div>
                     <p className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                      {monthlyUsage.used.toLocaleString()} / {monthlyUsage.limit.toLocaleString()} used
+                      {usageValue.toLocaleString()} / {limitValue.toLocaleString()} used
                     </p>
                   </div>
                 )}
